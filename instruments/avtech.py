@@ -384,12 +384,16 @@ class Avtech(VisaInstrument):
     # Error checking
     # ------------------------------------------------------------------
 
+    def get_error(self) -> str:
+        """Return the instrument's most recent SCPI error queue entry."""
+        return self._query("system:error?")
+
     def check_error(self) -> None:
         """Raise if the instrument's error queue reports a pending error.
 
         Raises:
             AvtechError: If the instrument reports a non-zero error code.
         """
-        err = self._query("system:error?")
+        err = self.get_error()
         if not err.startswith("0"):
             raise AvtechError(err)

@@ -194,7 +194,7 @@ class MFLI:
         except zi_errors.CoreError as exc:
             raise MFLIError(f"Failed to set {path!r} to {value!r}: {exc}") from exc
 
-    def _get_sample(self, path: str) -> dict:
+    def _get_sample(self, path: str) -> dict[str, np.ndarray]:
         """Read a single demodulator sample, wrapping low-level zhinst errors.
 
         Raises:
