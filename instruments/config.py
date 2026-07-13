@@ -10,3 +10,6 @@ QDAC_VISA_ADDRESS = "ASRL4::INSTR"
 
 QDAC_BAUD_RATE = 921600
 """Default serial baud rate used for QDac ASRL connections."""
+
+AVTECH_VISA_ADDRESS = "GPIB0::9::INSTR"
+"""Default Avtech pulse generator VISA resource address (GPIB connection)."""
