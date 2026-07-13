@@ -18,6 +18,17 @@ DEFAULT_SERIES_RESISTANCE_OHM = 50.0
 """Default known series/shunt resistance (R0) used to derive DUT current
 from two scope channel voltages, in ohms."""
 
+DEFAULT_CHANNEL_ROLES = {"voltage": 1, "current": 2, "trigger": 3}
+"""Default Rigol channel-to-role mapping for the pulse-voltage sweep.
+
+"voltage" is the channel whose fitted plateau value is reported as the DUT
+voltage. "current" is the channel read alongside "voltage" to derive DUT
+current via Ohm's law across the known series resistor:
+``current = (V[current] - V[voltage]) / series_resistance_ohm``. "trigger"
+is the channel the scope's edge trigger is configured from. Override the
+channel arguments on :func:`measurement.sweep.run_voltage_sweep` if the
+physical wiring differs."""
+
 # MFLI lock-in amplifier defaults.
 # Pulled directly from code_collection/MFLI_test.ipynb. That notebook has
 # no reusable wrapper (only a short vendor-example-style script), so these
