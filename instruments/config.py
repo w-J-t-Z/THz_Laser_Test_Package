@@ -13,3 +13,7 @@ QDAC_BAUD_RATE = 921600
 
 AVTECH_VISA_ADDRESS = "GPIB0::9::INSTR"
 """Default Avtech pulse generator VISA resource address (GPIB connection)."""
+
+DEFAULT_SERIES_RESISTANCE_OHM = 50.0
+"""Default known series/shunt resistance (R0) used to derive DUT current
+from two scope channel voltages, in ohms."""

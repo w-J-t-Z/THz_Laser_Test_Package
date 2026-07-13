@@ -191,6 +191,21 @@ class VisaInstrument:
         except pyvisa.errors.VisaIOError as exc:
             raise self.error_cls(f"Query failed for command {cmd!r}: {exc}") from exc
 
+    def _read_raw(self) -> bytes:
+        """Read a raw (binary) response, wrapping low-level VISA errors.
+
+        Returns:
+            The raw bytes read from the instrument.
+
+        Raises:
+            InstrumentError: If the underlying VISA read fails.
+        """
+        session = self._require_session()
+        try:
+            return session.read_raw()
+        except pyvisa.errors.VisaIOError as exc:
+            raise self.error_cls(f"Raw read failed: {exc}") from exc
+
     def _write_binary_values(self, cmd: str, values: object) -> None:
         """Send a SCPI command followed by binary-encoded values.
 
