@@ -96,7 +96,7 @@ class QDac(VisaInstrument):
         self._write(f"sour{channel}:mode fixed")
         self._write(f"sour{channel}:volt 0")
 
-    def set_channel_slew_rate(self, channel: int, slew_rate: float = 10) -> None:
+    def set_channel_slew_rate(self, channel: int, slew_rate: float = 2e7) -> None:
         """Set the voltage slew rate for a single channel.
 
         Args:
@@ -188,7 +188,7 @@ class QDac(VisaInstrument):
         frequency: float,
         span: float,
         offset: float,
-        trigger_source: str,
+        trigger_source: int,
         delay: Optional[float] = None,
         duty_cycle: Optional[float] = None,
     ) -> None:
@@ -200,10 +200,11 @@ class QDac(VisaInstrument):
             span: Peak-to-peak voltage span in volts.
             offset: DC offset in volts (typically ``span / 2`` so the wave
                 sits between 0 V and ``span``).
-            trigger_source: Internal trigger group to arm on, e.g.
-                ``"INT1"``, ``"INT2"``. Channels sharing the same trigger
-                source fire together when :meth:`fire_internal_trigger` is
-                called with the matching group index.
+            trigger_source: Internal trigger group to arm on (e.g. ``1``
+                for ``INT1``, ``2`` for ``INT2``). Internal-only in this
+                setup. Channels sharing the same trigger source fire
+                together when :meth:`fire_internal_trigger` is called with
+                the matching group index.
             delay: Optional delay in seconds between the trigger firing and
                 the waveform starting.
             duty_cycle: Optional duty cycle in percent.
@@ -215,7 +216,7 @@ class QDac(VisaInstrument):
         parts.append(f"offs {offset}")
         if duty_cycle is not None:
             parts.append(f"dcycle {duty_cycle}")
-        parts.append(f"trig:sour {trigger_source}")
+        parts.append(f"trig:sour INT{trigger_source}")
         self._write(";".join(parts))
 
     def start_square_wave(self, channel: int) -> None:

@@ -36,8 +36,8 @@ instruments/
     rigol.py            # Rigol: scope readout + GMM plateau extraction
     mfli.py             # MFLI: lock-in configuration + averaged readout
 measurement/
-    sweep.py            # run_voltage_sweep orchestration
-    data_io.py          # save/load sweep results (CSV, optional HDF5)
+    sweep.py            # run_voltage_sweep orchestration (live-plot callback, interrupt/timeout safety)
+    data_io.py          # save/load sweep results (CSV+JSON run folder; CSV/HDF5 standalone)
     plotting.py         # I-V and optical-intensity-vs-voltage plots
 notebooks/
     01_test_qdac.ipynb
@@ -66,9 +66,10 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-HDF5 support in `measurement.data_io` is optional and needs `h5py`
-(`pip install h5py`); everything else, including CSV support, works with
-the base `requirements.txt`.
+Standalone HDF5 support in `measurement.data_io` (`save_hdf5`/`load_hdf5`)
+is optional and needs `h5py` (`pip install h5py`); everything else,
+including `save_sweep_result`'s CSV+JSON output, works with the base
+`requirements.txt`.
 
 ## Running the notebooks
 
@@ -86,12 +87,18 @@ jupyter lab
   cleanly end-to-end and print a clear "hardware not available" message
   on a machine with no instruments connected -- including this
   development environment.
-- **`05_full_sweep_demo.ipynb`** demonstrates the full workflow: configure
-  all four instruments, sweep the pulse voltage with
-  `measurement.sweep.run_voltage_sweep`, save the result with
-  `measurement.data_io`, and plot it with `measurement.plotting`. If any
-  instrument is unavailable, it falls back to clearly-labeled synthetic
-  `dummy_data` so the saving/plotting logic can still be demonstrated.
+- **`05_full_sweep_demo.ipynb`** demonstrates the full workflow in a single
+  cell: configure all four instruments, sweep the pulse voltage with
+  `measurement.sweep.run_voltage_sweep` (live-plotting each point via a
+  `clear_output`-based callback), and always end up with a saved result --
+  `data/<timestamped run folder>/sweep.csv` + `metadata.json` -- whether
+  the sweep completes normally, is interrupted (Jupyter's "Interrupt
+  Kernel", handled internally: the Avtech is ramped to 0 V and its output
+  disabled, while the QDac trigger train, Rigol, and MFLI stay connected
+  and running), or exceeds `SweepConfig.max_runtime_s` (default 1000 s). If
+  any instrument is unavailable, it falls back to clearly-labeled
+  synthetic `dummy_data` so the saving/plotting logic can still be
+  demonstrated.
 
 On the lab computer, with real instruments connected, the same cells
 should run against actual hardware without any changes.
@@ -110,23 +117,33 @@ import numpy as np
 with QDac() as qdac, Avtech() as avtech, Rigol() as rigol, MFLI() as mfli:
     # ... configure each instrument (trigger/gate channels, pulse trigger
     # source, scope timebase/channels/trigger, lock-in demodulator) ...
-    df = run_voltage_sweep(
+    result = run_voltage_sweep(
         avtech, rigol, mfli, qdac,
         voltages=np.linspace(2.0, 10.0, 5),
         sweep_config=SweepConfig(idle_voltage=5.0),
     )
+    # Interrupting this call (e.g. Ctrl-C) is caught internally: the
+    # Avtech is ramped to 0 V and its output disabled, and `result` still
+    # comes back with status="interrupted" and whatever data was collected.
 
-data_io.save_csv(df, "data/sweep.csv")
-plotting.plot_iv_curve(df, show=True)
-plotting.plot_intensity_curve(df, show=True)
+run_dir = data_io.save_sweep_result(result, "data")  # -> data/<run>/sweep.csv + metadata.json
+plotting.plot_iv_curve(result.data, show=True)
+plotting.plot_intensity_curve(result.data, show=True)
 ```
 
 ## Hardware status
 
-No real instruments are connected to this development machine. Every
-class in `instruments/` was verified with unit-level checks (synthetic
-data, fake/injected sessions) and by executing the notebooks headlessly,
-but never against real hardware. Several MFLI defaults in
-`instruments/config.py` and `instruments/mfli.py` are explicitly flagged
-**CONFIRM ON REAL HARDWARE** and should be checked on the lab computer
-before relying on them.
+This package was originally developed with no real instruments connected,
+and has since had its QDac, Rigol, and MFLI defaults confirmed against
+the real lab hardware:
+
+- **QDac**: trigger/gate square-wave configuration confirmed working.
+- **Rigol**: the fixed default address
+  (`instruments.config.RIGOL_VISA_ADDRESS`) connects successfully.
+- **MFLI**: the `"PCIe"` interface (`instruments.config.MFLI_INTERFACE`)
+  connects successfully.
+
+Avtech has not yet been confirmed against real hardware from this
+environment. Everything in `instruments/` and `measurement/` is also
+covered by unit-level checks (synthetic data, fake/injected sessions) and
+by executing the notebooks headlessly.

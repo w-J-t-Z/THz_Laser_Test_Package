@@ -14,11 +14,16 @@ QDAC_BAUD_RATE = 921600
 AVTECH_VISA_ADDRESS = "GPIB0::9::INSTR"
 """Default Avtech pulse generator VISA resource address (GPIB connection)."""
 
+RIGOL_VISA_ADDRESS = "USB0::0x1AB1::0x0610::HDO4A244301030::INSTR"
+"""Default Rigol oscilloscope VISA resource address, confirmed against the
+real instrument. Pass ``resource=None`` to ``Rigol()`` to auto-detect the
+USB VISA resource instead (see ``Rigol.connect``)."""
+
 DEFAULT_SERIES_RESISTANCE_OHM = 50.0
 """Default known series/shunt resistance (R0) used to derive DUT current
 from two scope channel voltages, in ohms."""
 
-DEFAULT_CHANNEL_ROLES = {"voltage": 1, "current": 2, "trigger": 3}
+DEFAULT_CHANNEL_ROLES = {"voltage": 2, "current": 1, "trigger": 3}
 """Default Rigol channel-to-role mapping for the pulse-voltage sweep.
 
 "voltage" is the channel whose fitted plateau value is reported as the DUT
@@ -46,9 +51,6 @@ MFLI_API_LEVEL = 6
 MFLI_DEVICE_ID = "dev7598"
 """Default MFLI device serial as seen in the legacy MFLI notebook."""
 
-MFLI_INTERFACE = "1GbE"
-"""Default device interface passed to connectDevice(). CONFIRM ON REAL
-HARDWARE: the legacy notebook never called connectDevice() explicitly (the
-device may have already been connected via the LabOne UI), so this
-interface string ("1GbE" vs. "USB", etc.) has not actually been exercised
-against the physical instrument."""
+MFLI_INTERFACE = "PCIe"
+"""Default device interface passed to connectDevice(). Confirmed working
+against the real instrument."""

@@ -102,7 +102,7 @@ class Rigol(VisaInstrument):
 
     def __init__(
         self,
-        resource: Optional[str] = None,
+        resource: Optional[str] = config.RIGOL_VISA_ADDRESS,
         *,
         resource_manager: Optional[pyvisa.ResourceManager] = None,
         timeout_ms: int = 20000,
@@ -114,16 +114,48 @@ class Rigol(VisaInstrument):
         self._chunk_size = chunk_size
 
     def connect(self) -> None:
-        """Auto-detect the scope's VISA resource (if not given) and connect.
+        """Connect to the configured resource, with a diagnostic auto-detect on failure.
+
+        If ``resource`` is explicitly ``None``, the USB VISA resource is
+        auto-detected and used directly. Otherwise (the default case, using
+        :data:`instruments.config.RIGOL_VISA_ADDRESS`), this tries that
+        resource first; if the connection fails, it runs the auto-detect
+        logic purely as a diagnostic -- logging whatever USB VISA
+        resource(s) it finds so you know what to put in
+        ``instruments.config.RIGOL_VISA_ADDRESS`` -- and then re-raises the
+        original connection error rather than silently connecting to
+        whatever it found.
 
         Raises:
-            RigolError: If no resource was given and auto-detection does
-                not find exactly one USB VISA resource, or if the
-                connection itself fails.
+            RigolError: If the connection fails. The log output includes a
+                diagnostic hint about any USB VISA resource found instead.
         """
         if self.resource is None:
             self.resource = self._auto_detect_usb_resource()
-        super().connect()
+            super().connect()
+            self._require_session().chunk_size = self._chunk_size
+            return
+
+        try:
+            super().connect()
+        except RigolError:
+            logger.error(
+                "Failed to connect to Rigol at %s; attempting to auto-detect "
+                "a USB VISA resource as a diagnostic.",
+                self.resource,
+            )
+            try:
+                candidate = self._auto_detect_usb_resource()
+                logger.error(
+                    "Found USB VISA resource %s. If this is the correct "
+                    "instrument, update RIGOL_VISA_ADDRESS in "
+                    "instruments/config.py.",
+                    candidate,
+                )
+            except RigolError as detect_exc:
+                logger.error("Auto-detect also failed: %s", detect_exc)
+            raise
+
         self._require_session().chunk_size = self._chunk_size
 
     def _auto_detect_usb_resource(self) -> str:

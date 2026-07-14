@@ -15,8 +15,10 @@ it only performs the per-step measurement loop, not full instrument setup.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict, dataclass, fields
-from typing import Optional, Sequence
+from datetime import datetime, timezone
+from typing import Callable, Optional, Sequence
 
 import pandas as pd
 
@@ -70,11 +72,13 @@ class SweepConfig:
     """Known series/shunt resistance (R0) in ohms."""
 
     ramp_step_size: float = 1.0
-    """Maximum Avtech voltage change per ramp step, in volts. See
+    """Maximum Avtech voltage change per ramp step, in volts. Also used for
+    the emergency ramp-down on interrupt/timeout. See
     :meth:`instruments.avtech.Avtech.ramp_to_voltage`."""
 
     ramp_sleep_time: float = 2.0
-    """Seconds to wait after each Avtech ramp step."""
+    """Seconds to wait after each Avtech ramp step (including the
+    emergency ramp-down)."""
 
     settle_time: float = 1.0
     """Seconds to wait around the Rigol single-shot trigger. See
@@ -96,7 +100,9 @@ class SweepConfig:
 
     idle_voltage: Optional[float] = None
     """If given, the Avtech is ramped to this voltage after the sweep
-    finishes (e.g. to leave the device under test in a safe idle state)."""
+    finishes normally (e.g. to leave the device under test in a safe idle
+    state). Not used on interrupt/timeout -- see the module docstring on
+    :func:`run_voltage_sweep` for the emergency shutdown behavior instead."""
 
     trigger_group: Optional[int] = None
     """If given and ``qdac`` is provided to :func:`run_voltage_sweep`, this
@@ -105,6 +111,63 @@ class SweepConfig:
     :meth:`instruments.qdac.QDac.fire_internal_trigger`). Left ``None`` if
     the trigger train is already running or is started separately by the
     caller."""
+
+    max_runtime_s: float = 1000.0
+    """Maximum wall-clock time the sweep is allowed to run before it is
+    stopped automatically (same emergency shutdown as an interrupt, with
+    ``status="timed_out"``). Guards against a sweep left running
+    unattended for far longer than intended."""
+
+
+@dataclass
+class SweepResult:
+    """The outcome of a :func:`run_voltage_sweep` call: data plus run metadata."""
+
+    data: pd.DataFrame
+    """One row per completed voltage step, columns matching :class:`SweepPoint`."""
+
+    start_time: str
+    """ISO 8601 UTC timestamp when the sweep started."""
+
+    end_time: str
+    """ISO 8601 UTC timestamp when the sweep ended (normally, interrupted, or timed out)."""
+
+    status: str
+    """One of ``"completed"``, ``"interrupted"``, or ``"timed_out"``."""
+
+    completed_points: int
+    """Number of voltage steps actually completed."""
+
+    total_points: int
+    """Number of voltage steps that were planned."""
+
+    sweep_config: SweepConfig
+    """The :class:`SweepConfig` used for this run."""
+
+
+def _emergency_stop(avtech: Avtech, cfg: SweepConfig) -> None:
+    """Ramp the Avtech to 0 V and disable its output, tolerating a second interrupt.
+
+    Uses the same step size/sleep time as the sweep's normal ramp. If a
+    second interrupt arrives while this ramp-down itself is in progress,
+    the gradual ramp is abandoned and the output is disabled immediately
+    instead, rather than leaving the pulse generator in an ambiguous
+    half-ramped state.
+
+    Args:
+        avtech: The Avtech pulse generator to shut down.
+        cfg: Sweep configuration providing the ramp step size/sleep time.
+    """
+    try:
+        avtech.ramp_to_voltage(
+            0.0, step_size=cfg.ramp_step_size, sleep_time=cfg.ramp_sleep_time
+        )
+    except KeyboardInterrupt:
+        logger.warning(
+            "Second interrupt during emergency ramp-down; disabling output immediately."
+        )
+    finally:
+        avtech.output_off()
 
 
 def run_voltage_sweep(
@@ -115,13 +178,23 @@ def run_voltage_sweep(
     *,
     voltages: Sequence[float],
     sweep_config: Optional[SweepConfig] = None,
-) -> pd.DataFrame:
+    on_step: Optional[Callable[[pd.DataFrame], None]] = None,
+) -> SweepResult:
     """Sweep the Avtech pulse voltage and record (V, I, lock-in) at each step.
 
     At each voltage in ``voltages``, this ramps the Avtech to that voltage,
     triggers a single-shot Rigol acquisition on the configured
     voltage/current channels, derives the DUT voltage and current, and
     reads an averaged MFLI lock-in sample.
+
+    If interrupted (``KeyboardInterrupt``, e.g. from a Jupyter cell
+    interrupt) or if ``sweep_config.max_runtime_s`` is exceeded, this
+    immediately ramps the Avtech down to 0 V and disables its output
+    (leaving the QDac trigger train, Rigol, and MFLI connected and
+    untouched), then returns normally with whatever data was collected so
+    far rather than propagating the exception -- so a single call always
+    produces a result, whether the sweep finished naturally or was cut
+    short.
 
     Args:
         avtech: Connected, pre-configured Avtech pulse generator.
@@ -134,58 +207,87 @@ def run_voltage_sweep(
         voltages: Sequence of pulse voltages to sweep over, in volts.
         sweep_config: Sweep parameters; defaults to ``SweepConfig()`` if
             omitted.
+        on_step: Optional callback invoked after each completed step with
+            the DataFrame of all points collected so far (e.g. to drive a
+            live-updating plot in a notebook via
+            ``IPython.display.clear_output``). Kept free of any notebook
+            dependency here; the callback itself does the display work.
 
     Returns:
-        A :class:`pandas.DataFrame` with one row per swept voltage and
-        columns matching the fields of :class:`SweepPoint`.
+        A :class:`SweepResult` bundling the collected data with run
+        metadata (timestamps, completion status, and the config used).
     """
     cfg = sweep_config or SweepConfig()
+    columns = [f.name for f in fields(SweepPoint)]
 
     if qdac is not None and cfg.trigger_group is not None:
         qdac.fire_internal_trigger(cfg.trigger_group)
 
     records: list[SweepPoint] = []
     total = len(voltages)
-    for step, target_voltage in enumerate(voltages, start=1):
-        logger.info(
-            "Sweep step %d/%d: ramping pulse voltage to %s V", step, total, target_voltage
-        )
-        avtech.ramp_to_voltage(
-            target_voltage,
-            step_size=cfg.ramp_step_size,
-            sleep_time=cfg.ramp_sleep_time,
-        )
+    start_time = datetime.now(timezone.utc)
+    start_monotonic = time.monotonic()
+    status = "completed"
 
-        waveforms = rigol.acquire_single_shot(
-            [cfg.voltage_channel, cfg.current_channel], settle_time=cfg.settle_time
-        )
-        dut_voltage = rigol.extract_plateau_voltage(
-            waveforms[cfg.voltage_channel][1], robust_trim=cfg.robust_trim
-        )
-        upstream_voltage = rigol.extract_plateau_voltage(
-            waveforms[cfg.current_channel][1], robust_trim=cfg.robust_trim
-        )
-        dut_current = (upstream_voltage - dut_voltage) / cfg.series_resistance_ohm
+    try:
+        for step, target_voltage in enumerate(voltages, start=1):
+            if time.monotonic() - start_monotonic > cfg.max_runtime_s:
+                logger.warning(
+                    "Sweep exceeded max_runtime_s=%s at step %d/%d; stopping.",
+                    cfg.max_runtime_s,
+                    step,
+                    total,
+                )
+                status = "timed_out"
+                break
 
-        lockin = mfli.read_averaged_sample(
-            cfg.mfli_demod_index,
-            n_samples=cfg.mfli_n_samples,
-            delay=cfg.mfli_delay,
-        )
-
-        records.append(
-            SweepPoint(
-                set_voltage=target_voltage,
-                dut_voltage=dut_voltage,
-                dut_current=dut_current,
-                lockin_x=lockin["x"],
-                lockin_y=lockin["y"],
-                lockin_r=lockin["r"],
-                lockin_phase=lockin["phase"],
+            logger.info(
+                "Sweep step %d/%d: ramping pulse voltage to %s V", step, total, target_voltage
             )
-        )
+            avtech.ramp_to_voltage(
+                target_voltage,
+                step_size=cfg.ramp_step_size,
+                sleep_time=cfg.ramp_sleep_time,
+            )
 
-    if cfg.idle_voltage is not None:
+            waveforms = rigol.acquire_single_shot(
+                [cfg.voltage_channel, cfg.current_channel], settle_time=cfg.settle_time
+            )
+            dut_voltage = rigol.extract_plateau_voltage(
+                waveforms[cfg.voltage_channel][1], robust_trim=cfg.robust_trim
+            )
+            upstream_voltage = rigol.extract_plateau_voltage(
+                waveforms[cfg.current_channel][1], robust_trim=cfg.robust_trim
+            )
+            dut_current = (upstream_voltage - dut_voltage) / cfg.series_resistance_ohm
+
+            lockin = mfli.read_averaged_sample(
+                cfg.mfli_demod_index,
+                n_samples=cfg.mfli_n_samples,
+                delay=cfg.mfli_delay,
+            )
+
+            records.append(
+                SweepPoint(
+                    set_voltage=target_voltage,
+                    dut_voltage=dut_voltage,
+                    dut_current=dut_current,
+                    lockin_x=lockin["x"],
+                    lockin_y=lockin["y"],
+                    lockin_r=lockin["r"],
+                    lockin_phase=lockin["phase"],
+                )
+            )
+
+            if on_step is not None:
+                on_step(pd.DataFrame([asdict(point) for point in records], columns=columns))
+    except KeyboardInterrupt:
+        logger.warning("Sweep interrupted by user at step %d/%d.", len(records) + 1, total)
+        status = "interrupted"
+
+    if status in ("interrupted", "timed_out"):
+        _emergency_stop(avtech, cfg)
+    elif cfg.idle_voltage is not None:
         logger.info("Sweep finished: ramping pulse voltage to idle %s V", cfg.idle_voltage)
         avtech.ramp_to_voltage(
             cfg.idle_voltage,
@@ -193,5 +295,15 @@ def run_voltage_sweep(
             sleep_time=cfg.ramp_sleep_time,
         )
 
-    columns = [f.name for f in fields(SweepPoint)]
-    return pd.DataFrame([asdict(point) for point in records], columns=columns)
+    end_time = datetime.now(timezone.utc)
+    df = pd.DataFrame([asdict(point) for point in records], columns=columns)
+
+    return SweepResult(
+        data=df,
+        start_time=start_time.isoformat(),
+        end_time=end_time.isoformat(),
+        status=status,
+        completed_points=len(records),
+        total_points=total,
+        sweep_config=cfg,
+    )
