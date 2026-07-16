@@ -30,7 +30,7 @@ optical-intensity-vs-voltage curves.
 ```
 instruments/
     base.py            # InstrumentError, InstrumentProtocol, VisaInstrument
-    config.py           # default VISA addresses, channel roles, R0, MFLI defaults
+    config.py           # default VISA addresses, channel roles/offsets, R0, MFLI defaults
     qdac.py             # QDac: trigger/gate signal generator
     avtech.py           # Avtech: swept pulse voltage source
     rigol.py            # Rigol: scope readout + GMM plateau extraction

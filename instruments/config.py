@@ -34,6 +34,13 @@ is the channel the scope's edge trigger is configured from. Override the
 channel arguments on :func:`measurement.sweep.run_voltage_sweep` if the
 physical wiring differs."""
 
+DEFAULT_CHANNEL_OFFSETS_V = {"voltage": 0.0, "current": 0.0, "trigger": 0.0}
+"""Default per-role vertical offset (volts) passed to
+``Rigol.configure_channel``'s ``offset`` argument, keyed the same way as
+:data:`DEFAULT_CHANNEL_ROLES`. All zero by default; adjust per-run (e.g. in
+``05_full_sweep_demo.ipynb``) if a channel's signal needs to be recentered
+on the scope display."""
+
 # MFLI lock-in amplifier defaults.
 # Pulled directly from code_collection/MFLI_test.ipynb. That notebook has
 # no reusable wrapper (only a short vendor-example-style script), so these

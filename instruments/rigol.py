@@ -193,14 +193,19 @@ class Rigol(VisaInstrument):
         if offset is not None:
             self._write(f":TIM:OFFS {offset}")
 
-    def configure_channel(self, channel: int, scale: float) -> None:
-        """Set a channel's vertical scale.
+    def configure_channel(
+        self, channel: int, scale: float, *, offset: Optional[float] = None
+    ) -> None:
+        """Set a channel's vertical scale and, optionally, offset.
 
         Args:
             channel: Channel number.
             scale: Vertical scale in volts/division.
+            offset: Vertical offset in volts, if given.
         """
         self._write(f":CHANNEL{channel}:SCALE {scale}")
+        if offset is not None:
+            self._write(f":CHANNEL{channel}:OFFS {offset}")
 
     def configure_trigger(
         self, source_channel: int, *, level: float, slope: str = "POSITIVE"
