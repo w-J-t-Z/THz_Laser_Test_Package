@@ -358,7 +358,8 @@ class MFLI:
         single instantaneous ``getSample`` call, X and Y are each averaged
         over ``n_samples`` reads before deriving R and phase, giving a
         lower-noise estimate of the optical-intensity signal at each pulse
-        voltage step.
+        voltage step. The spread across those ``n_samples`` reads is also
+        reported, to help spot noisy signal conditions.
 
         Args:
             demod_index: Demodulator index to read.
@@ -367,7 +368,14 @@ class MFLI:
 
         Returns:
             Dict with keys ``"x"``, ``"y"``, ``"r"``, ``"phase"`` (as in
-            :meth:`read_sample`) plus ``"n_samples"``.
+            :meth:`read_sample`), ``"x_std"``, ``"y_std"``, ``"r_std"``
+            (sample standard deviation, ``ddof=1``, across the
+            ``n_samples`` reads; ``NaN`` if ``n_samples == 1``), and
+            ``"n_samples"``. ``r_std`` is computed empirically from the
+            per-sample ``R = hypot(x, y)`` values, not propagated
+            analytically from ``x_std``/``y_std``. There is no
+            ``"phase_std"``: phase is a circular quantity and a plain
+            linear std would be misleading near the +/-pi wraparound.
 
         Raises:
             MFLIError: If ``n_samples`` is not positive.
@@ -384,12 +392,27 @@ class MFLI:
             if delay:
                 time.sleep(delay)
 
-        x_mean = float(np.mean(x_values))
-        y_mean = float(np.mean(y_values))
+        x_array = np.asarray(x_values)
+        y_array = np.asarray(y_values)
+        r_array = np.hypot(x_array, y_array)
+
+        x_mean = float(np.mean(x_array))
+        y_mean = float(np.mean(y_array))
+
+        if n_samples > 1:
+            x_std = float(np.std(x_array, ddof=1))
+            y_std = float(np.std(y_array, ddof=1))
+            r_std = float(np.std(r_array, ddof=1))
+        else:
+            x_std = y_std = r_std = float("nan")
+
         return {
             "x": x_mean,
             "y": y_mean,
             "r": float(np.hypot(x_mean, y_mean)),
             "phase": float(np.arctan2(y_mean, x_mean)),
+            "x_std": x_std,
+            "y_std": y_std,
+            "r_std": r_std,
             "n_samples": n_samples,
         }

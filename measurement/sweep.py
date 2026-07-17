@@ -15,6 +15,7 @@ it only performs the per-step measurement loop, not full instrument setup.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
@@ -41,18 +42,42 @@ class SweepPoint:
     dut_voltage: float
     """DUT voltage measured on the scope's "voltage" channel, in volts."""
 
+    dut_voltage_std: float
+    """Standard deviation of the GMM plateau fit underlying ``dut_voltage``,
+    in volts (spread within the single-shot waveform capture, not
+    repeat-measurement noise)."""
+
     dut_current: float
     """DUT current derived from the "current"/"voltage" channel pair via
     Ohm's law across the known series resistor, in amps."""
 
+    dut_current_std: float
+    """Standard deviation of ``dut_current``, propagated from
+    ``dut_voltage_std`` and the "current" channel's own plateau-fit std,
+    assuming the series resistance itself is noise-free, in amps."""
+
     lockin_x: float
     """Lock-in in-phase component, in volts."""
+
+    lockin_x_std: float
+    """Sample standard deviation of X across the averaged lock-in reads, in
+    volts (``NaN`` if only one sample was read)."""
 
     lockin_y: float
     """Lock-in quadrature component, in volts."""
 
+    lockin_y_std: float
+    """Sample standard deviation of Y across the averaged lock-in reads, in
+    volts (``NaN`` if only one sample was read)."""
+
     lockin_r: float
     """Lock-in magnitude (optical intensity proxy), in volts."""
+
+    lockin_r_std: float
+    """Sample standard deviation of R across the averaged lock-in reads, in
+    volts (``NaN`` if only one sample was read). Computed empirically from
+    the per-sample R values, not propagated from ``lockin_x_std``/
+    ``lockin_y_std``."""
 
     lockin_phase: float
     """Lock-in phase, in radians."""
@@ -253,13 +278,17 @@ def run_voltage_sweep(
             waveforms = rigol.acquire_single_shot(
                 [cfg.voltage_channel, cfg.current_channel], settle_time=cfg.settle_time
             )
-            dut_voltage = rigol.extract_plateau_voltage(
+            dut_voltage, dut_voltage_std = rigol.extract_plateau_stats(
                 waveforms[cfg.voltage_channel][1], robust_trim=cfg.robust_trim
             )
-            upstream_voltage = rigol.extract_plateau_voltage(
+            upstream_voltage, upstream_voltage_std = rigol.extract_plateau_stats(
                 waveforms[cfg.current_channel][1], robust_trim=cfg.robust_trim
             )
             dut_current = (upstream_voltage - dut_voltage) / cfg.series_resistance_ohm
+            # Series resistance assumed noise-free: Var(current) = (Var(upstream) + Var(dut)) / R0^2.
+            dut_current_std = (
+                math.hypot(upstream_voltage_std, dut_voltage_std) / cfg.series_resistance_ohm
+            )
 
             lockin = mfli.read_averaged_sample(
                 cfg.mfli_demod_index,
@@ -271,10 +300,15 @@ def run_voltage_sweep(
                 SweepPoint(
                     set_voltage=target_voltage,
                     dut_voltage=dut_voltage,
+                    dut_voltage_std=dut_voltage_std,
                     dut_current=dut_current,
+                    dut_current_std=dut_current_std,
                     lockin_x=lockin["x"],
+                    lockin_x_std=lockin["x_std"],
                     lockin_y=lockin["y"],
+                    lockin_y_std=lockin["y_std"],
                     lockin_r=lockin["r"],
+                    lockin_r_std=lockin["r_std"],
                     lockin_phase=lockin["phase"],
                 )
             )

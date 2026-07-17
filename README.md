@@ -23,7 +23,10 @@ signal).
 
 The experiment sweeps the pulse voltage and, at each step, acquires
 (voltage, current, lock-in signal), then plots the resulting I-V and
-optical-intensity-vs-voltage curves.
+optical-intensity-vs-voltage curves. Each quantity's standard deviation is
+also recorded (`*_std` columns) -- the DUT voltage/current from the spread
+of the Rigol GMM plateau fit, and the lock-in X/Y/R from repeat MFLI
+reads -- and plotted as error bars, to help spot noisy signal conditions.
 
 ## Directory structure
 
@@ -89,16 +92,19 @@ jupyter lab
   development environment.
 - **`05_full_sweep_demo.ipynb`** demonstrates the full workflow in a single
   cell: configure all four instruments, sweep the pulse voltage with
-  `measurement.sweep.run_voltage_sweep` (live-plotting each point via a
-  `clear_output`-based callback), and always end up with a saved result --
-  `data/<timestamped run folder>/sweep.csv` + `metadata.json` -- whether
-  the sweep completes normally, is interrupted (Jupyter's "Interrupt
-  Kernel", handled internally: the Avtech is ramped to 0 V and its output
-  disabled, while the QDac trigger train, Rigol, and MFLI stay connected
-  and running), or exceeds `SweepConfig.max_runtime_s` (default 1000 s). If
-  any instrument is unavailable, it falls back to clearly-labeled
-  synthetic `dummy_data` so the saving/plotting logic can still be
-  demonstrated.
+  `measurement.sweep.run_voltage_sweep` (live-plotting each point, with
+  error bars, via a `clear_output`-based callback), and always end up with
+  a saved result -- `data/<timestamped run folder>/sweep.csv` +
+  `metadata.json` -- whether the sweep completes normally, is interrupted
+  (Jupyter's "Interrupt Kernel", handled internally: the Avtech is ramped
+  to 0 V and its output disabled, while the QDac trigger train, Rigol, and
+  MFLI stay connected and running), or exceeds `SweepConfig.max_runtime_s`
+  (default 1000 s). If any instrument is unavailable, it falls back to
+  clearly-labeled synthetic `dummy_data` so the saving/plotting logic can
+  still be demonstrated. A dedicated "Sweep settings" cell exposes the
+  frequently-tuned `SweepConfig` fields (e.g. `mfli_n_samples`/
+  `mfli_delay` -- raise these if the lock-in signal is noisy -- ramp/settle
+  timing, `idle_voltage`, `max_runtime_s`) as plain editable variables.
 
 On the lab computer, with real instruments connected, the same cells
 should run against actual hardware without any changes.

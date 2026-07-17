@@ -303,6 +303,46 @@ class Rigol(VisaInstrument):
     # GMM-based plateau extraction and derived current measurement
     # ------------------------------------------------------------------
 
+    def extract_plateau_stats(
+        self,
+        voltage: np.ndarray,
+        *,
+        robust_trim: bool = False,
+        trim_quantile: float = 0.01,
+        n_init: int = 10,
+        random_state: int = 42,
+    ) -> tuple[float, float]:
+        """Extract the pulse-plateau voltage and its spread via a 2-Gaussian fit.
+
+        A waveform is modeled as a mixture of two levels -- the baseline
+        and the pulse plateau -- plus a small amount of noise; the higher
+        of the two fitted Gaussian components' mean and standard deviation
+        are returned. This is the GMM approach used in
+        ``code_collection/QCL_IVL_sweep.ipynb``.
+
+        Args:
+            voltage: 1D array of waveform samples in volts, as returned by
+                :meth:`get_waveform`.
+            robust_trim: Whether to remove outlier samples at both tails
+                before fitting.
+            trim_quantile: Fraction trimmed from each tail when
+                ``robust_trim`` is True.
+            n_init: Number of random GMM initializations.
+            random_state: Random seed for reproducible fits.
+
+        Returns:
+            ``(mean, std)`` of the higher-mean fitted Gaussian component,
+            both in volts.
+        """
+        means, stds, _weights = _fit_two_gaussians(
+            voltage,
+            n_init=n_init,
+            random_state=random_state,
+            robust_trim=robust_trim,
+            trim_quantile=trim_quantile,
+        )
+        return float(means[-1]), float(stds[-1])
+
     def extract_plateau_voltage(
         self,
         voltage: np.ndarray,
@@ -314,11 +354,9 @@ class Rigol(VisaInstrument):
     ) -> float:
         """Extract the pulse-plateau voltage from a waveform via a 2-Gaussian fit.
 
-        A waveform is modeled as a mixture of two levels -- the baseline
-        and the pulse plateau -- plus a small amount of noise; the higher
-        of the two fitted Gaussian means is returned as the plateau value.
-        This is the GMM approach used in
-        ``code_collection/QCL_IVL_sweep.ipynb``.
+        Convenience wrapper around :meth:`extract_plateau_stats` that
+        returns only the mean; see that method for the standard deviation
+        as well.
 
         Args:
             voltage: 1D array of waveform samples in volts, as returned by
@@ -334,14 +372,14 @@ class Rigol(VisaInstrument):
             The higher of the two fitted Gaussian component means, in
             volts.
         """
-        means, _stds, _weights = _fit_two_gaussians(
+        mean, _std = self.extract_plateau_stats(
             voltage,
-            n_init=n_init,
-            random_state=random_state,
             robust_trim=robust_trim,
             trim_quantile=trim_quantile,
+            n_init=n_init,
+            random_state=random_state,
         )
-        return float(means[-1])
+        return mean
 
     def measure_plateau_voltage(
         self,
