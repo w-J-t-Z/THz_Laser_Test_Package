@@ -28,6 +28,12 @@ also recorded (`*_std` columns) -- the DUT voltage/current from the spread
 of the Rigol GMM plateau fit, and the lock-in X/Y/R from repeat MFLI
 reads -- and plotted as error bars, to help spot noisy signal conditions.
 
+A second experiment sweeps the QDac CH1 on/off chopper frequency instead
+(holding the pulse voltage, CH2's pulse trigger frequency, and the MFLI's
+demodulator filter/rate fixed) to find which chopper frequency gives the
+best lock-in SNR -- see `measurement/chopper_sweep.py` and
+`06_chopper_frequency_sweep_demo.ipynb`.
+
 ## Directory structure
 
 ```
@@ -40,14 +46,16 @@ instruments/
     mfli.py             # MFLI: lock-in configuration + averaged readout
 measurement/
     sweep.py            # run_voltage_sweep orchestration (live-plot callback, interrupt/timeout safety)
+    chopper_sweep.py     # run_chopper_frequency_sweep orchestration (same pattern, CH1 frequency sweep)
     data_io.py          # save/load sweep results (CSV+JSON run folder; CSV/HDF5 standalone)
-    plotting.py         # I-V and optical-intensity-vs-voltage plots
+    plotting.py         # I-V, optical-intensity, R-vs-frequency, and SNR-vs-frequency plots
 notebooks/
     01_test_qdac.ipynb
     02_test_avtech.ipynb
     03_test_rigol.ipynb
     04_test_mfli.ipynb
     05_full_sweep_demo.ipynb
+    06_chopper_frequency_sweep_demo.ipynb
 code_collection/        # legacy scripts, read-only reference, not modified
 requirements.txt
 CLAUDE.md                # persistent instructions/context for AI-assisted work
@@ -105,6 +113,17 @@ jupyter lab
   frequently-tuned `SweepConfig` fields (e.g. `mfli_n_samples`/
   `mfli_delay` -- raise these if the lock-in signal is noisy -- ramp/settle
   timing, `idle_voltage`, `max_runtime_s`) as plain editable variables.
+- **`06_chopper_frequency_sweep_demo.ipynb`** is the same single-cell
+  pattern, but sweeps the QDac CH1 on/off chopper frequency instead of the
+  pulse voltage, to find the chopper frequency with the best lock-in SNR.
+  CH1's candidate frequencies are restricted to common factors of CH2's
+  fixed 2000 Hz pulse trigger frequency (so the pulse train stays phase-
+  locked and stable), and every step resets *both* channels together from
+  their shared trigger group. Rigol is not used. Live-plots R vs. chopper
+  frequency (log-x) during the sweep, and has separate cells afterward for
+  R-vs-frequency and SNR-vs-frequency (selectable `quantities=("r","x","y")`)
+  plots. Interrupt/timeout safety always leaves the Avtech ramped to 0 V
+  and off, and CH1 reset back to its default 200 Hz.
 
 On the lab computer, with real instruments connected, the same cells
 should run against actual hardware without any changes.

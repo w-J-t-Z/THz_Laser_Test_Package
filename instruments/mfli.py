@@ -257,6 +257,15 @@ class MFLI:
         self._set(self._node("demods", str(demod_index), "order"), filter_order)
         self._set(self._node("demods", str(demod_index), "timeconstant"), time_constant)
 
+    def configure_demod_rate(self, demod_index: int = 0, *, rate_hz: float) -> None:
+        """Set a demodulator's output sample rate.
+
+        Args:
+            demod_index: Demodulator index (0-based).
+            rate_hz: Sample rate in samples/second.
+        """
+        self._set(self._node("demods", str(demod_index), "rate"), rate_hz)
+
     def configure_external_reference(self, ref_index: int = 0, *, enable: bool = True) -> None:
         """Enable or disable locking an internal oscillator to an external reference.
 
